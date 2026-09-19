@@ -19,13 +19,24 @@ PROMPT = ChatPromptTemplate.from_messages(
 )
 
 
+def page_label(page: object) -> object:
+    """Convert a 0-indexed page number to a human-readable 1-indexed one.
+
+    Pinecone round-trips numeric metadata as float (protobuf has no int
+    type), so page numbers come back as e.g. 3.0 rather than 3 even though
+    they were ints at ingest time.
+    """
+    if isinstance(page, (int, float)):
+        return int(page) + 1
+    return page
+
+
 def format_docs(docs: list[Document]) -> str:
     parts = []
     for doc in docs:
-        page = doc.metadata.get("page")
-        page_label = page + 1 if isinstance(page, int) else page
+        page = page_label(doc.metadata.get("page"))
         source = doc.metadata.get("source", "")
-        parts.append(f"[source={source} page={page_label}]\n{doc.page_content}")
+        parts.append(f"[source={source} page={page}]\n{doc.page_content}")
     return "\n\n".join(parts)
 
 
@@ -70,6 +81,4 @@ if __name__ == "__main__":
     print("Answer:\n" + result)
     print("\nSources:")
     for source_doc in sources:
-        page = source_doc.metadata.get("page")
-        page_label = page + 1 if isinstance(page, int) else page
-        print(f" - page {page_label} ({source_doc.metadata.get('source')})")
+        print(f" - page {page_label(source_doc.metadata.get('page'))} ({source_doc.metadata.get('source')})")

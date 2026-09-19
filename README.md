@@ -44,6 +44,21 @@ flowchart TB
     Index -- "top-k chunks" --> Retrieve
 ```
 
+Both the CLI (`main.py`) and the API (`app/server.py`) share the same `app/rag.py` retrieval + generation chain.
+
+```mermaid
+flowchart LR
+    Browser["Chat app browser client"]
+    NextRoute["Next.js route\n/api/rag-chat"]
+    FastAPI["FastAPI\nPOST /chat"]
+    RAGChain["app/rag.py\nretriever + prompt + ChatOpenAI"]
+    PineconeIdx[("Pinecone index")]
+
+    Browser --> NextRoute --> FastAPI --> RAGChain
+    RAGChain <--> PineconeIdx
+    RAGChain -- "answer + sources" --> FastAPI --> NextRoute --> Browser
+```
+
 ## Setup
 
 ```bash
@@ -62,6 +77,37 @@ python main.py ingest
 # Ask a question
 python main.py ask "What are the main risk factors disclosed in this filing?"
 ```
+
+## Run as an API
+
+The same retrieval + generation chain is also exposed over HTTP via FastAPI, so
+other apps (e.g. a chat frontend) can call it:
+
+```bash
+uvicorn app.server:app --reload --port 8000
+```
+
+- `GET /health` — liveness check.
+- `POST /chat` — body `{"messages": [{"role": "user", "content": "..."}]}`,
+  returns `{"text": "...", "sources": [{"source": "...", "page": 3}, ...]}`.
+  Only the last `user` message is used as the retrieval query.
+
+```bash
+curl -X POST http://localhost:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"What fiscal year does this filing cover?"}]}'
+```
+
+Set `CORS_ORIGINS` (comma-separated, default `http://localhost:3000`) to allow
+the calling frontend's origin.
+
+### Integration with my_test_chat_app
+
+[my_test_chat_app](https://github.com/achyutasvm/my_test_chat_app) is a Next.js
+chat app. It calls this service via a server-side proxy route
+(`app/api/rag-chat/route.ts`) under a "Document Q&A" mode, alongside its
+existing general-purpose Gemini chat. Run both services locally and set
+`RAG_API_URL=http://localhost:8000` in that app's `.env.local` to connect them.
 
 ## Config
 

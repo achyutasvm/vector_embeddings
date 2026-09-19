@@ -25,9 +25,7 @@ def main() -> None:
         print("Answer:\n" + answer)
         print("\nSources:")
         for doc in docs:
-            page = doc.metadata.get("page")
-            page_label = page + 1 if isinstance(page, int) else page
-            print(f" - page {page_label} ({doc.metadata.get('source')})")
+            print(f" - page {rag.page_label(doc.metadata.get('page'))} ({doc.metadata.get('source')})")
 
 
 if __name__ == "__main__":

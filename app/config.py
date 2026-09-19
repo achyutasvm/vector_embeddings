@@ -32,3 +32,7 @@ DOCS_DIR = os.environ.get("DOCS_DIR", "docs")
 CHUNK_SIZE = int(os.environ.get("CHUNK_SIZE", "1000"))
 CHUNK_OVERLAP = int(os.environ.get("CHUNK_OVERLAP", "150"))
 TOP_K = int(os.environ.get("RAG_TOP_K", "5"))
+
+# Comma-separated origins allowed to call the FastAPI service (e.g. the
+# Next.js chat app's dev/prod URLs).
+CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "http://localhost:3000")
