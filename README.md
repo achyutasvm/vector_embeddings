@@ -91,11 +91,16 @@ uvicorn app.server:app --reload --port 8000
 - `POST /chat` — body `{"messages": [{"role": "user", "content": "..."}]}`,
   returns `{"text": "...", "sources": [{"source": "...", "page": 3}, ...]}`.
   Only the last `user` message is used as the retrieval query.
+- `POST /ingest` — multipart upload, field name `file` (PDF only, 25MB max).
+  Saves the file into `docs/`, then chunks/embeds/upserts it, same as
+  `python main.py ingest`. Returns `{"filename", "pages", "chunks"}`.
 
 ```bash
 curl -X POST http://localhost:8000/chat \
   -H "Content-Type: application/json" \
   -d '{"messages":[{"role":"user","content":"What fiscal year does this filing cover?"}]}'
+
+curl -X POST http://localhost:8000/ingest -F "file=@docs/some-report.pdf"
 ```
 
 Set `CORS_ORIGINS` (comma-separated, default `http://localhost:3000`) to allow

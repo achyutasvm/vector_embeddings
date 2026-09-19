@@ -1,10 +1,13 @@
+from pathlib import Path
 from typing import Literal, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from app import config, rag
+from app import config, ingest, rag
+
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 
 app = FastAPI(title="Pinecone RAG API")
 
@@ -35,9 +38,45 @@ class ChatResponse(BaseModel):
     sources: list[Source]
 
 
+class IngestResponse(BaseModel):
+    filename: str
+    pages: int
+    chunks: int
+
+
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.post("/ingest", response_model=IngestResponse)
+def ingest_pdf(file: UploadFile = File(...)) -> IngestResponse:
+    filename = Path(file.filename or "").name
+    if not filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported")
+
+    docs_dir = Path(config.DOCS_DIR)
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    dest = docs_dir / filename
+
+    size = 0
+    with dest.open("wb") as out:
+        while chunk := file.file.read(1024 * 1024):
+            size += len(chunk)
+            if size > MAX_UPLOAD_BYTES:
+                out.close()
+                dest.unlink(missing_ok=True)
+                raise HTTPException(status_code=413, detail="File too large (max 25MB)")
+            out.write(chunk)
+
+    try:
+        pages = ingest.load_pdf(dest)
+    except Exception as exc:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=f"Could not read PDF: {exc}") from exc
+
+    chunk_count = ingest.ingest_documents(pages)
+    return IngestResponse(filename=filename, pages=len(pages), chunks=chunk_count)
 
 
 @app.post("/chat", response_model=ChatResponse)

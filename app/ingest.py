@@ -10,6 +10,11 @@ from pinecone import Pinecone, ServerlessSpec
 from app import config
 
 
+def load_pdf(pdf_path: Path) -> list[Document]:
+    """Load a single PDF into one Document per page."""
+    return PyPDFLoader(str(pdf_path)).load()
+
+
 def load_pages(docs_dir: Path) -> list[Document]:
     """Load every PDF in docs_dir into one Document per page."""
     pdf_paths = sorted(docs_dir.glob("*.pdf"))
@@ -18,7 +23,7 @@ def load_pages(docs_dir: Path) -> list[Document]:
 
     pages: list[Document] = []
     for pdf_path in pdf_paths:
-        pages.extend(PyPDFLoader(str(pdf_path)).load())
+        pages.extend(load_pdf(pdf_path))
     return pages
 
 
@@ -30,12 +35,13 @@ def chunk_by_page(pages: list[Document]) -> list[Document]:
     )
     chunks = splitter.split_documents(pages)
 
-    counts: dict[int, int] = {}
+    counts: dict[tuple[str, int], int] = {}
     for chunk in chunks:
         source = Path(chunk.metadata.get("source", "doc")).stem
         page = chunk.metadata.get("page", 0)
-        counts[page] = counts.get(page, 0) + 1
-        chunk.metadata["chunk_id"] = f"{source}-p{page}-{counts[page]}"
+        key = (source, page)
+        counts[key] = counts.get(key, 0) + 1
+        chunk.metadata["chunk_id"] = f"{source}-p{page}-{counts[key]}"
     return chunks
 
 
@@ -54,10 +60,9 @@ def ensure_index(pc: Pinecone) -> None:
         time.sleep(1)
 
 
-def run() -> None:
-    pages = load_pages(Path(config.DOCS_DIR))
+def ingest_documents(pages: list[Document]) -> int:
+    """Chunk pages, embed, and upsert into Pinecone. Returns the chunk count."""
     chunks = chunk_by_page(pages)
-    print(f"Loaded {len(pages)} pages -> {len(chunks)} recursive chunks.")
 
     pc = Pinecone(api_key=config.PINECONE_API_KEY)
     ensure_index(pc)
@@ -74,8 +79,16 @@ def run() -> None:
         namespace=config.PINECONE_NAMESPACE,
         ids=[c.metadata["chunk_id"] for c in chunks],
     )
+    return len(chunks)
+
+
+def run() -> None:
+    pages = load_pages(Path(config.DOCS_DIR))
+    print(f"Loaded {len(pages)} pages from {config.DOCS_DIR}")
+
+    chunk_count = ingest_documents(pages)
     print(
-        f"Upserted {len(chunks)} chunks into index "
+        f"Upserted {chunk_count} chunks into index "
         f"'{config.PINECONE_INDEX_NAME}' (namespace '{config.PINECONE_NAMESPACE}')."
     )
 
