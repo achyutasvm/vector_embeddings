@@ -9,3 +9,7 @@ python-dotenv
 fastapi
 uvicorn[standard]
 python-multipart
+
+# eval/ harness only (LLM-as-a-judge)
+langchain-groq
+langchain-google-genai

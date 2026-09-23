@@ -7,3 +7,6 @@ __pycache__/
 .agents/
 .claude/
 skills-lock.json
+
+# Generated eval run logs, not source
+eval/output/
