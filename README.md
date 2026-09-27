@@ -111,8 +111,37 @@ the calling frontend's origin.
 [my_test_chat_app](https://github.com/achyutasvm/my_test_chat_app) is a Next.js
 chat app. It calls this service via a server-side proxy route
 (`app/api/rag-chat/route.ts`) under a "Document Q&A" mode, alongside its
-existing general-purpose Gemini chat. Run both services locally and set
-`RAG_API_URL=http://localhost:8000` in that app's `.env.local` to connect them.
+existing general-purpose Gemini chat. That app also supports a second,
+Qdrant-backed RAG service as an alternative — a per-question selector picks
+which one to call. Run this service locally and set
+`RAG_API_URL_PINECONE=http://localhost:8000` in that app's `.env.local` to
+connect this one.
+
+## Evaluation
+
+`eval/` runs an "LLM-as-a-judge" check on the pipeline's answer quality:
+
+```bash
+python eval/generate_answers.py   # runs eval/QUESTIONS through the real app/rag.py pipeline
+python eval/evaluate_answers.py   # has two independent models judge each answer correct/incorrect
+```
+
+Needs `GROQ_API_KEY` ([console.groq.com](https://console.groq.com), free tier)
+and `GOOGLE_API_KEY` ([aistudio.google.com/apikey](https://aistudio.google.com/apikey))
+in `.env`, in addition to the main pipeline's keys. Output goes to
+`eval/output/` (gitignored — it's generated data, not source): `responses.json`
+from step one, `evaluation.json`/`evaluation.csv` from step two.
+
+Two things worth knowing before running it:
+- **Judge model names go stale.** Both judge models here have already been
+  swapped once after the provider retired the original one (see git history
+  in `eval/evaluate_answers.py`) — a `model not found` error means checking
+  the provider's current model list and updating `JUDGES`.
+- **Gemini's free tier caps at 20 requests/day, per project** (not per key —
+  a new key under the same project doesn't reset it). `evaluate_answers.py`
+  fails fast on a quota error instead of retrying (retrying just burns the
+  same scarce quota faster) and saves/resumes incrementally, so a run
+  interrupted by quota only needs to redo what wasn't already judged.
 
 ## Config
 
