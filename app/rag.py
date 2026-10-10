@@ -1,10 +1,12 @@
+from typing import Optional
+
 from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from langchain_pinecone import PineconeEmbeddings, PineconeVectorStore
 
-from app import config
+from app import config, rerank
 
 PROMPT = ChatPromptTemplate.from_messages(
     [
@@ -40,7 +42,7 @@ def format_docs(docs: list[Document]) -> str:
     return "\n\n".join(parts)
 
 
-def build_retriever() -> PineconeVectorStore:
+def build_retriever(k: int = config.TOP_K) -> PineconeVectorStore:
     embeddings = PineconeEmbeddings(
         model=config.EMBEDDING_MODEL,
         pinecone_api_key=config.PINECONE_API_KEY,
@@ -51,7 +53,7 @@ def build_retriever() -> PineconeVectorStore:
         namespace=config.PINECONE_NAMESPACE,
         pinecone_api_key=config.PINECONE_API_KEY,
     )
-    return vector_store.as_retriever(search_kwargs={"k": config.TOP_K})
+    return vector_store.as_retriever(search_kwargs={"k": k})
 
 
 def build_chain():
@@ -63,9 +65,18 @@ def build_chain():
     return PROMPT | llm | StrOutputParser()
 
 
-def ask(question: str) -> tuple[str, list[Document]]:
-    retriever = build_retriever()
-    docs = retriever.invoke(question)
+def retrieve(question: str, use_rerank: Optional[bool] = None) -> list[Document]:
+    if use_rerank is None:
+        use_rerank = config.RERANK_ENABLED
+    if not use_rerank:
+        return build_retriever().invoke(question)
+
+    candidates = build_retriever(max(config.RERANK_CANDIDATES, config.TOP_K)).invoke(question)
+    return rerank.rerank(question, candidates, config.TOP_K)
+
+
+def ask(question: str, use_rerank: Optional[bool] = None) -> tuple[str, list[Document]]:
+    docs = retrieve(question, use_rerank)
 
     chain = build_chain()
     answer = chain.invoke({"context": format_docs(docs), "question": question})
