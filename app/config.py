@@ -33,6 +33,13 @@ CHUNK_SIZE = int(os.environ.get("CHUNK_SIZE", "1000"))
 CHUNK_OVERLAP = int(os.environ.get("CHUNK_OVERLAP", "150"))
 TOP_K = int(os.environ.get("RAG_TOP_K", "5"))
 
+# Reranking: fetch RERANK_CANDIDATES chunks from the vector store, score each
+# against the question with a Pinecone-hosted reranker model, and keep the
+# best TOP_K. Requests can override RERANK_ENABLED per call.
+RERANK_ENABLED = os.environ.get("RERANK_ENABLED", "true").lower() in ("1", "true", "yes")
+RERANK_MODEL = os.environ.get("RERANK_MODEL", "bge-reranker-v2-m3")
+RERANK_CANDIDATES = int(os.environ.get("RERANK_CANDIDATES", "20"))
+
 # Comma-separated origins allowed to call the FastAPI service (e.g. the
 # Next.js chat app's dev/prod URLs).
 CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "http://localhost:3000")

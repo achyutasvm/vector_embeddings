@@ -8,6 +8,9 @@ Retrieval-augmented generation over the PDF(s) in `docs/`.
 - **Embeddings**: Pinecone's hosted inference model `llama-text-embed-v2`, via
   `langchain-pinecone`'s `PineconeEmbeddings`.
 - **Vector store**: Pinecone serverless index, via `PineconeVectorStore`.
+- **Reranking** (on by default): retrieves 20 candidate chunks, scores each
+  against the question with Pinecone's hosted reranker `bge-reranker-v2-m3`, and
+  keeps the best top-k. See [Reranking](#reranking).
 - **Generation**: OpenAI, via `langchain-openai`'s `ChatOpenAI` (default `gpt-4o-mini`).
   (Pinecone doesn't expose a standalone generation model outside its separate,
   auto-chunking Assistant product, so generation is done with an LLM here.)
@@ -32,16 +35,18 @@ flowchart TB
         direction TB
         Question["Question"]
         EmbedQuery["PineconeEmbeddings\nllama-text-embed-v2"]
-        Retrieve["Similarity search (top-k)"]
+        Retrieve["Similarity search\n(20 candidates)"]
+        Rerank["Pinecone reranker\nbge-reranker-v2-m3\n(keep top-k)"]
         Prompt["ChatPromptTemplate\n(context + question)"]
         LLM["ChatOpenAI\ngpt-4o-mini"]
         Answer["Answer + cited page numbers"]
-        Question --> EmbedQuery --> Retrieve --> Prompt --> LLM --> Answer
+        Question --> EmbedQuery --> Retrieve --> Rerank --> Prompt --> LLM --> Answer
+        Retrieve -. "rerank off: top-k" .-> Prompt
     end
 
     PDF --> Loader
     EmbedDocs -- "upsert chunks" --> Index
-    Index -- "top-k chunks" --> Retrieve
+    Index -- "candidate chunks" --> Retrieve
 ```
 
 Both the CLI (`main.py`) and the API (`app/server.py`) share the same `app/rag.py` retrieval + generation chain.
@@ -51,7 +56,7 @@ flowchart LR
     Browser["Chat app browser client"]
     NextRoute["Next.js route\n/api/rag-chat"]
     FastAPI["FastAPI\nPOST /chat"]
-    RAGChain["app/rag.py\nretriever + prompt + ChatOpenAI"]
+    RAGChain["app/rag.py\nretriever + reranker + prompt + ChatOpenAI"]
     PineconeIdx[("Pinecone index")]
 
     Browser --> NextRoute --> FastAPI --> RAGChain
@@ -88,9 +93,11 @@ uvicorn app.server:app --reload --port 8000
 ```
 
 - `GET /health` — liveness check.
-- `POST /chat` — body `{"messages": [{"role": "user", "content": "..."}]}`,
-  returns `{"text": "...", "sources": [{"source": "...", "page": 3}, ...]}`.
-  Only the last `user` message is used as the retrieval query.
+- `POST /chat` — body `{"messages": [{"role": "user", "content": "..."}], "rerank": true}`,
+  returns `{"text": "...", "sources": [{"source": "...", "page": 3, "rerank_score": 0.54}, ...]}`.
+  Only the last `user` message is used as the retrieval query. `rerank` is
+  optional and overrides `RERANK_ENABLED` for that request. `sources` are in
+  rank order; `rerank_score` is `null` when reranking didn't run.
 - `POST /ingest` — multipart upload, field name `file` (PDF only, 25MB max).
   Saves the file into `docs/`, then chunks/embeds/upserts it, same as
   `python main.py ingest`. Returns `{"filename", "pages", "chunks"}`.
@@ -116,6 +123,32 @@ Qdrant-backed RAG service as an alternative — a per-question selector picks
 which one to call. Run this service locally and set
 `RAG_API_URL_PINECONE=http://localhost:8000` in that app's `.env.local` to
 connect this one.
+
+## Reranking
+
+Vector similarity finds chunks that *sound* like the question, which isn't
+always the chunk that *answers* it. With reranking on, `app/rag.py`:
+
+1. Retrieves `RERANK_CANDIDATES` (default 20) chunks from Pinecone instead of `RAG_TOP_K`.
+2. Sends the question and those chunks to Pinecone's hosted reranker
+   (`app/rerank.py`, `pc.inference.rerank`, model `bge-reranker-v2-m3`), which
+   scores each chunk's relevance from 0 to 1. It uses the existing
+   `PINECONE_API_KEY`; there's nothing extra to install.
+3. Keeps the `RAG_TOP_K` highest-scoring chunks, in score order, for generation.
+
+If the rerank call fails (quota, network), it logs the error and falls back to
+the plain similarity-search order rather than failing the question.
+
+Example from the Apple 10-K: for "How much did Apple spend on research and
+development?", similarity search ranks first an operating-expenses table that
+shows R&D only as a percentage (p. 27); the reranker puts the income
+statement with the dollar amounts (p. 32) first. Reranking isn't always
+better: for "What was Apple's effective tax rate?" it ranks an auditor's note
+above the passage that states the rate. It also can't help when the right
+chunk isn't among the candidates at all.
+
+Settings (`.env`): `RERANK_ENABLED` (default `true`), `RERANK_MODEL`
+(default `bge-reranker-v2-m3`), `RERANK_CANDIDATES` (default `20`).
 
 ## Evaluation
 
@@ -146,5 +179,6 @@ Two things worth knowing before running it:
 ## Config
 
 All settings are environment variables (see `.env.example`): index name/cloud/region/
-namespace, embedding model + dimension, generation model, chunk size/overlap, and
-retrieval top-k.
+namespace, embedding model + dimension, generation model, chunk size/overlap,
+retrieval top-k, and reranking (`RERANK_ENABLED`, `RERANK_MODEL`,
+`RERANK_CANDIDATES`).
